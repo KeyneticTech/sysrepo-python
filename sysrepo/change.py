@@ -27,7 +27,7 @@ class Change:
     def parse(
         operation: int,
         node: libyang.DNode,
-        prev_val: str,
+        prev_val: Any,
         prev_list: str,
         prev_dflt: bool,
         include_implicit_defaults: bool = True,
@@ -83,7 +83,9 @@ class Change:
                 prev_dflt=prev_dflt,
             )
         if operation == lib.SR_OP_DELETED:
-            return ChangeDeleted(node.path())
+            return ChangeDeleted(
+                node.path(),
+                prev_val=prev_val)
         if operation == lib.SR_OP_MOVED:
             return ChangeMoved(
                 node.path(),
@@ -136,7 +138,7 @@ class ChangeModified(Change):
 
     __slots__ = ("value", "prev_val", "prev_dflt")
 
-    def __init__(self, xpath: str, value: Any, prev_val: str, prev_dflt: bool = False):
+    def __init__(self, xpath: str, value: Any, prev_val: Any, prev_dflt: bool = False):
         super().__init__(xpath)
         self.value = value
         self.prev_val = prev_val
@@ -156,7 +158,12 @@ class ChangeModified(Change):
 
 # ------------------------------------------------------------------------------
 class ChangeDeleted(Change):
-    pass
+
+    __slots__ = ("prev_val",)
+
+    def __init__(self, xpath: str, prev_val: Any):
+        super().__init__(xpath)
+        self.prev_val = prev_val
 
 
 # ------------------------------------------------------------------------------
