@@ -741,15 +741,22 @@ class SysrepoSession:
         :returns:
             An iterator that will yield `sysrepo.Change` objects.
         """
+        # sr_get_change_tree_next and sr_get_change_next functions
+        # need their own iterators.
         iter_p = ffi.new("sr_change_iter_t **")
+        iter_b_p = ffi.new("sr_change_iter_t **")
 
         check_call(lib.sr_get_changes_iter, self.cdata, str2c(xpath), iter_p)
+        check_call(lib.sr_get_changes_iter, self.cdata, str2c(xpath), iter_b_p)
 
         op_p = ffi.new("sr_change_oper_t *")
         node_p = ffi.new("struct lyd_node **")
         prev_val_p = ffi.new("char **")
         prev_list_p = ffi.new("char **")
         prev_dflt_p = ffi.new("int *")
+        # sr_get_change_next
+        old_value = ffi.new("sr_val_t **")
+        new_value = ffi.new("sr_val_t **")
         try:
             ret = check_call(
                 lib.sr_get_change_tree_next,
@@ -762,13 +769,35 @@ class SysrepoSession:
                 prev_dflt_p,
                 valid_codes=(lib.SR_ERR_OK, lib.SR_ERR_NOT_FOUND),
             )
+            # Use sr_get_change_next to get old_value in
+            # SR_OP_DELETED / SR_OP_MODIFIED operations.
+            # prev_val from sr_get_change_tree_next does not specify
+            # data type, but old_value from sr_get_change_next does.
+            # prev_val / old_value is NULL in other operations.
+            check_call(
+                lib.sr_get_change_next,
+                self.cdata,
+                iter_b_p[0],
+                op_p,
+                old_value,
+                new_value,
+                valid_codes=(lib.SR_ERR_OK, lib.SR_ERR_NOT_FOUND),
+            )
             while ret == lib.SR_ERR_OK:
                 try:
                     with self.get_ly_ctx() as ctx:
                         yield Change.parse(
                             operation=op_p[0],
                             node=libyang.DNode.new(ctx, node_p[0]),
-                            prev_val=c2str(prev_val_p[0]),
+                            # c2str() always returns a string, not valid
+                            # when we need to know the data type.
+                            # Value.parse() returns parsed value (e.g.,
+                            # int, bool, str...).
+                            prev_val=c2str(prev_val_p[0])
+                            # parse sr_val_t ** for SR_OP_DELETED /
+                            # SR_OP_MODIFIED
+                            if op_p[0] not in [lib.SR_OP_DELETED, lib.SR_OP_MODIFIED]
+                            else Value.parse(old_value[0]),
                             prev_list=c2str(prev_list_p[0]),
                             prev_dflt=bool(prev_dflt_p[0]),
                             include_implicit_defaults=include_implicit_defaults,
@@ -784,6 +813,15 @@ class SysrepoSession:
                     prev_val_p,
                     prev_list_p,
                     prev_dflt_p,
+                    valid_codes=(lib.SR_ERR_OK, lib.SR_ERR_NOT_FOUND),
+                )
+                check_call(
+                    lib.sr_get_change_next,
+                    self.cdata,
+                    iter_b_p[0],
+                    op_p,
+                    old_value,
+                    new_value,
                     valid_codes=(lib.SR_ERR_OK, lib.SR_ERR_NOT_FOUND),
                 )
         finally:
